@@ -1,7 +1,7 @@
 
 
 
-Lexar and Syntax Checker made in Ruby.
+Lexar and Syntax Checker made in Ruby.\n
 Below is an example code that will be parsed without errors...
 
 ```
