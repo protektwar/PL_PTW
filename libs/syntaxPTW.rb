@@ -1,6 +1,6 @@
 require_relative "tokenKeywordPTW.rb"
 
-module RubyScript2CAPL
+module RubyScript
 class SyntaxPTW
     
   attr_accessor :keywordList, :typeOfToken, :operandList, :typeOfOperand, :typeOfCons

@@ -1,7 +1,7 @@
 require_relative 'version.rb'
 require_relative 'syntaxPTW.rb'
 
-module RubyScript2CAPL
+module RubyScript
 
 class LexicalAnalyzer
   attr_accessor :keywords, :error, :errorList, :specialChar

@@ -1,5 +1,5 @@
 
-module RubyScript2CAPL
+module RubyScript
   class Keywords
     
 	attr_accessor :keywordList, :typeOfKeyword
