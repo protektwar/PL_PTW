@@ -1,8 +1,8 @@
 
 
 
-Lexar and Syntax Checker made in Ruby.\n
-Below is an example code that will be parsed without errors...
+Lexar and Syntax Checker made in Ruby.  
+Below is an example code that will be parsed without errors...  
 
 ```
 #rcpl syntax check...
