@@ -1,0 +1,4 @@
+module RubyScript2CAPL
+	VERSIONLEXICALCONVERTER = "0.0.3"
+        VERSIONSYNTAXCHECKER = "0.0.4"
+end

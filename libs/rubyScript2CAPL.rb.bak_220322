@@ -1,0 +1,843 @@
+require_relative 'rubyScript2CAPL/version.rb'
+require_relative 'rubyScript2CAPL/syntax.rb'
+
+module RubyScript2CAPL
+
+class Converter
+  attr_accessor :keywords, :error, :errorList, :specialChar
+  attr_accessor :includeFiles, :functionNames, :variableNames
+
+  def initialize()
+    puts "Script2CAPLConverter"
+    puts "Version: #{VERSIONCONVERTER}"
+    @debugLexical = false
+    @keywords = Syntax.new()
+    @includeFiles = Array.new
+    @functionNames = Hash.new # {"functionName" => {0 => "param1", 1 => "param2"}
+    @variableNames = Array.new
+    @error = Hash.new #{ "Error Name" => {0 => "Linenumber",     1 => "whatkindoferror",       2 => "awaiting values are"               }
+                      #    generated         codeGenerated      key@errorList=>0 or 1       generated based on relations
+    @errorList = {0 => "not a relationship", 1 => "forbidenRelation" }
+    @specialChar = [
+                      "(", 
+                      ")",
+                      "[",
+                      "]",
+                      "{",
+                      "}",
+                      ";",
+                      ":",
+                      ",",
+                      #".",
+                      "\"",
+                      "'",
+                      "_",
+                      "-",
+                      "+",
+                      "=",
+                      "?",
+                      " ",
+                      "#",
+                      "|",
+                      "<",
+                      ">",
+                      "\/",
+                      "\\",
+                      "~",
+                      "!",
+                      "@",
+                      "$",
+                      "%",
+                      "^",
+                      "&",
+                      "*",
+                      "\n",
+                      "\t",
+                      "\r"
+                   ]
+  end
+
+  def activateLexicalDebugger
+    @debugLexical = true
+  end
+
+  def convert(file2Convert)
+    parseAndTranslateToSyntaxSimbols(file2Convert)
+  end
+    
+  def parseAndTranslateToSyntaxSimbols(file2Convert)
+    typeOfToken = "K_NA" #Keyword notAvailable  
+    typeOfOperand = "O_NA" #Operand notAvailable  
+    typeOfRelation = "R_NA" #Relationship notAvailable  
+    
+    openCloseCompound = 0;
+    openCloseBraket = 0;
+    openCloseParant = 0;
+    openCloseBraces = 0;
+    compoundVariable = Array.new
+          
+    fileContent = File.open(file2Convert).read
+    tempFileContent = File.open("tempFileContent.translated","w")
+    
+    fileContent.gsub!(/\r\n?/,"\n")
+      
+    fileContent.each_line do |line|
+      charsFromLine = line.split("")
+        
+      word = ""
+      wordLast = ""
+      specialWord = ""
+      specialWordLast = "" 
+      haveWord = false
+      haveWordOldState = haveWord
+      gotoNextLine = false
+      currentToken = "T_NA"
+      isCompound = false
+      isParanthesis = false
+      isBraket = false
+      isBraces = false
+        
+      charsFromLine.each_with_index.map do |chr, chr_idx|
+        puts "#{__LINE__} New word from line #{line}" if @debugLexical
+        puts "current CHAR: #{chr}" if @debugLexical
+        if ( gotoNextLine == false )
+          if (specialChar.include?(chr))
+            puts "SPECIAL! chr -> #{chr} ORD #{chr.ord}" if @debugLexical
+            if ( chr == "#" ) 
+              gotoNextLine = true
+              next
+            end
+
+            case chr
+            when "("
+              openCloseParant = openCloseParant + 1
+              puts "Paranthesis: #{openCloseParant} word: #{word} wordLast: #{wordLast}" if @debugLexical
+            when ")"
+              openCloseParant = openCloseParant - 1
+              puts "Paranthesis: #{openCloseParant} word: #{word} wordLast: #{wordLast}" if @debugLexical
+              if (word.empty?)
+                # tempFileContent.write("EMPTY ")
+              end
+            when "["
+              openCloseBraket = openCloseBraket + 1
+              puts "Braket: #{openCloseBraket} word: #{word} wordLast: #{wordLast}" if @debugLexical
+            when "]"
+              openCloseBraket = openCloseBraket - 1
+              puts "Braket: #{openCloseBraket} word: #{word} wordLast: #{wordLast}" if @debugLexical
+            when "{"
+              openCloseBraces = openCloseBraces + 1
+              puts "Braces: #{openCloseBraces} word: #{word} wordLast: #{wordLast}" if @debugLexical
+            when "}"
+              openCloseBraces = openCloseBraces - 1
+              puts "Braces: #{openCloseBraces} word: #{word} wordLast: #{wordLast}" if @debugLexical
+            when "\"" 
+              if (!specialWordLast.include?("\\"))
+                openCloseCompound = openCloseCompound + 1
+                if ( (openCloseCompound % 2) == 0 )
+                  isCompound = true
+                  openCloseCompound = 0
+                end
+              end
+              puts "\n->openCloseCompound: #{openCloseCompound}<-\n" if @debugLexical
+            end 
+
+            if ( ( chr != "\n" ) && ( chr != "\t" ) && ( chr != "\r" ) && ( chr != " " ) )
+              puts "not \\n and not \\t and not \\r and not space!" if @debugLexical
+              specialWord = specialWord + chr
+              haveWord = true
+            else 
+              puts "\\n and \\t abd \\r and space!" if @debugLexical
+              if (openCloseCompound > 0)
+                if ( ( chr == " " ) && ( ( openCloseCompound % 2 ) == 0 ) )
+                  puts "space! and openclosecompound:#{openCloseCompound} % 2 == 0" if @debugLexical
+                  #specialWord = specialWord + chr
+                  word = word +chr
+                  haveWord = true
+                elsif (chr == " ")
+                  puts "space add to word" if @debugLexical
+                  word = word +chr
+                  haveWord = false
+                end
+              elsif ( (chr == " ") && (openCloseCompound == 0) )
+                puts "space && openCloseCompound == 0 haveWord" if @debugLexical
+                haveWord = true                  
+              end
+            end
+            haveWord = true
+            puts "!special! #{haveWord}" if @debugLexical
+          else #if specialChar.include?(chr) 
+            puts "notSPECIAL! chr -> #{chr} ORD #{chr.ord}" if @debugLexical
+            word = word +chr
+            haveWord = false
+          end #if specialChar.include?(chr)
+             
+          puts "#{chr}" if @debugLexical
+          if ( (haveWord == true) && (!word.empty?))
+            puts "Word ->#{word}<-" if @debugLexical
+            puts "haveWord is a Keyword #{word}" if @debugLexical
+            aux_word = word.downcase
+            typeOfToken = @keywords.isToken?(aux_word)
+            puts "haveWord is a Keyword #{typeOfToken}: #{aux_word}" if @debugLexical
+            if (typeOfToken != "T_NA")
+              #puts "#{typeOfKeyword}" if @debugLexical
+              currentToken = typeOfToken
+              tempFileContent.write("#{typeOfToken} ")
+            else # if typeOfToken  != "T_NA"
+              puts "!= T_NA -> #{typeOfToken} currentToken: #{currentToken}" if @debugLexical
+              if ( currentToken != "T_NA" )
+                puts "!= T_NA openCloseCompound: #{openCloseCompound}" if @debugLexical
+                if ( ( openCloseCompound == 0 ) && ( isCompound == true ) )
+                  puts "( openCloseCompound == 0 ) && ( isCompound == true ) S_VALUE #{aux_word} alphanumeric? ->#{@keywords.isAlphaNumeric?(aux_word)}<-" if @debugLexical
+                  tempFileContent.write("S_VALUE #{aux_word} ")
+                  isCompound = false
+                elsif ( ( openCloseCompound == 0 ) && ( isCompound == false ) )
+                  puts "( openCloseCompound == 0 ) && ( isCompound == false ) #{aux_word} alphanumeric? ->#{@keywords.isAlphaNumeric?(aux_word)}<-" if @debugLexical
+                  if (@keywords.isNumeric?(aux_word))
+                    puts "aux_word #{aux_word} is alphanumeric" if @debugLexical
+                    puts "isAlphaNumeric? #{@keywords.isAlphaNumeric?(aux_word)} write to file: N_VALUE #{aux_word}" if @debugLexical
+                    tempFileContent.write("N_VALUE #{aux_word} ")
+                  elsif @keywords.isAlphaNumeric?(aux_word)
+                    puts "isAlphaNumeric? #{@keywords.isAlphaNumeric?(aux_word)} write to file: I_VALUE #{aux_word}" if @debugLexical
+                    tempFileContent.write("I_VALUE #{aux_word} ")
+                  end
+                end
+              else # if currentToken != "T_NA"
+                puts "currentToken == T_NA" if @debugLexical
+                if ( ( openCloseCompound == 0 ) && ( isCompound == true ) )
+                  puts "( openCloseCompound == 0 ) && ( isCompound == true ) S_VALUE #{aux_word} alphanumeric? ->#{@keywords.isAlphaNumeric?(aux_word)}<-" if @debugLexical
+                  tempFileContent.write("S_VALUE #{aux_word} ")
+                  isCompound = false
+                elsif ( ( openCloseCompound == 0 ) && ( isCompound == false ) )
+                  puts "( openCloseCompound == 0 ) && ( isCompound == false ) #{aux_word} alphanumeric? ->#{@keywords.isAlphaNumeric?(aux_word)}<-" if @debugLexical
+                  if (@keywords.isNumeric?(aux_word))
+                    puts "aux_word #{aux_word} is alphanumeric" if @debugLexical
+                    puts "isAlphaNumeric? #{@keywords.isAlphaNumeric?(aux_word)} write to file: N_VALUE #{aux_word}" if @debugLexical
+                    tempFileContent.write("N_VALUE #{aux_word} ")
+                  elsif @keywords.isAlphaNumeric?(aux_word)
+                    puts "isAlphaNumeric? #{@keywords.isAlphaNumeric?(aux_word)} write to file: I_VALUE #{aux_word}" if @debugLexical
+                    tempFileContent.write("I_VALUE #{aux_word} ")
+                  end
+                end
+              end #if currentToken != "T_NA"
+            end # if typeOfToken  != "T_NA"
+            wordLast = word
+            word = ""
+          else #if ( (haveWord == true) && (!word.empty?))
+            puts "Word ->EMPTY? ->#{word}<-\n" if @debugLexical
+            if ( !word.empty? )
+              puts "notEMPTY! W:->#{word}<- SW:->#{specialWord}<-" if @debugLexical
+              puts "#{chr_idx} #{line.length-1}" if @debugLexical
+              if (chr_idx == line.length-1)
+                puts "#{word}" if @debugLexical
+                puts "End word is a Keyword #{word}" if @debugLexical
+                aux_word = word.downcase
+                typeOfToken = @keywords.isToken?(aux_word)
+                puts "End word is a Keyword #{typeOfToken}: #{aux_word}" if @debugLexical
+                if (typeOfToken != "T_NA")
+                  #puts "typeOfToken != T_NA #{typeOfKeyword} \n" if @debugLexical
+                  tempFileContent.write("#{typeOfToken} ")
+                else
+                  puts "!= T_NA -> #{typeOfToken} currentToken: #{currentToken}" if @debugLexical
+                  if ( currentToken != "T_NA" )
+                    puts "!= T_NA openCloseCompound: #{openCloseCompound}" if @debugLexical
+                    if (openCloseCompound == 0)
+                      if (@keywords.isAlphaNumeric?(aux_word))
+                        puts "write to file: I_VALUE #{aux_word}" if @debugLexical
+                        tempFileContent.write("I_VALUE #{aux_word} ")
+                      end
+                    end
+                  end
+                end
+                wordLast = word
+                word = ""
+              end
+            end
+          end#if ( (haveWord == true) && (!word.empty?))
+
+          if ( haveWordOldState != haveWord )
+            puts "|->#{specialWord}<-|" if @debugLexical
+            typeOfOperand = @keywords.isOperand?(specialWord)
+            puts "End word is a Keyword #{typeOfToken}: #{aux_word}" if @debugLexical
+            if (typeOfOperand != "O_NA")
+              puts "typeOfOperand != T_NA #{typeOfOperand}" if @debugLexical
+              tempFileContent.write("#{typeOfOperand} ")
+            end
+            specialWordLast = specialWord
+            specialWord = ""
+            haveWordOldState = haveWord
+          else #if ( haveWordOldState != haveWord )
+            if ( !specialWord.empty? )
+              if (chr_idx == line.length-1)
+                puts "@end|->#{specialWord}<-|" if @debugLexical
+                typeOfOperand = @keywords.isOperand?(specialWord)
+                puts "End word is a Keyword #{typeOfToken}: #{aux_word}" if @debugLexical
+                if (typeOfOperand != "O_NA")
+                  puts "typeOfOperand != T_NA #{typeOfOperand}" if @debugLexical
+                  tempFileContent.write("#{typeOfOperand} ")
+                end
+                specialWordLast = specialWord
+                specialWord = ""
+              end
+            end
+          end #if ( haveWordOldState != haveWord )
+        end # if ( gotoNextLine == false )
+      end # charsFromLine.each_with_index.map do |chr, chr_idx|
+      puts "" if @debugLexical
+      tempFileContent.write("\n")
+    end
+    tempFileContent.close
+  end
+
+end #class Converter
+
+class SyntaxChecker
+  attr_accessor :keywords, :error, :errorList, :specialChar
+  attr_accessor :includeFiles, :functionNames, :variableNames
+
+  def initialize()
+    puts "Script2CAPLSyntaxChecker"
+    puts "Version: #{VERSIONSYNTAXCHECKER}"
+    @syntax = Syntax.new()
+    @debugSyntax = false
+    @includeFiles = Array.new
+    @functionNames = Hash.new # {"functionName" => {0 => "param1", 1 => "param2"}
+    @variableNames = Array.new # {"variableName1", "variableName2", etc.}
+    @error = Hash.new #{ "Error Name" => {0 => "Linenumber",     1 => "whatkindoferror",       2 => "awaiting values are"               }
+                      #    generated         codeGenerated      key@errorList=>0 or 1       generated based on relations
+    @errorList = {0 => "not a relationship", 1 => "forbidenRelation" }
+  end
+
+  def activateSyntaxDebugger
+    @debugSyntax = true
+  end
+
+  def findWordInRelationShip(word, relationShips_, debug)
+    puts "#{__LINE__}#{debug}/function findWordInRelationShip Begin" if @debugSyntax
+    puts "#{__LINE__}#{debug}|-relationShips: #{relationShips_}" if @debugSyntax
+    relationShips_.each do |relation_key, relations|
+      puts "#{__LINE__}#{debug}|/Begin each! word: #{word} | relations: #{relations} | relation_key: #{relation_key}!" if @debugSyntax
+      if (relations.is_a?(Hash))
+        puts "#{__LINE__}#{debug}|-- is a Hash relations: #{relations} | word: >#{word}<" if @debugSyntax
+        key = findWordInRelationShip(word, relations, debug+"|-")
+        puts "#{__LINE__}#{debug}|-- word: #{word} | relations: #{relations} | key: #{key}" if @debugSyntax
+        relations.each do |r_key, rels|
+          puts "#{__LINE__}#{debug}|---/Begin each! word: #{word} | relations: #{relations} | relation_key: #{relation_key}!" if @debugSyntax
+          puts "#{__LINE__}#{debug}|--- word: #{word} | relations: #{rels} | r_key: #{r_key} | FoundKey: #{key}" if @debugSyntax
+          
+          if key == r_key 
+            puts "#{__LINE__}#{debug}\\--- return key from each:#{relation_key}<-" if @debugSyntax
+            return relation_key
+          end
+        end
+      else
+        puts "#{__LINE__}#{debug}|-- is not a Hash | relations: #{relations} | word: >#{word}<+++" if @debugSyntax 
+        if (relations == word)
+          puts "#{__LINE__}#{debug}\\-- return key from each:#{relation_key}<-" if @debugSyntax
+          return relation_key
+        end
+      end
+      puts "#{__LINE__}#{debug}\\--- End each!" if @debugSyntax
+    end
+    puts "#{__LINE__}#{debug}\\- return key: R_NA<-" if @debugSyntax
+    return "R_NA"
+  end
+
+  def toggle(variable)
+    if (variable)
+      return false
+    else
+      return true
+    end
+  end
+
+  def addKeyValue(hashVariableRef, hashVariableTarget, type, defaultValue)
+    case type
+    when "boolean"
+      hashVariableRef.each do |key, value|
+        puts "#{__LINE__} #{key} #{value}"
+        hashVariableTarget.store(key, defaultValue)
+      end
+    end
+  end
+
+  def checkIfSyntaxPassed(hashVariable)
+    hashVariable.each do |key, value|
+      if value == false
+        return false
+      end 
+    end
+    return true 
+  end
+
+  def checkIfRelationCanBeMissing(hashVariable)
+    hashVariable.each do |key, value| 
+      if value == "MISSING"
+        return true
+      end
+    end
+    return false 
+  end
+
+  def insertNewRelationShip(relationShipHash, key, pair, proximity=:before)
+    #relationShipHash.to_a.insert(relationShipHash.keys.index(key) + (proximity==:after ? 1 : 0), pair.first).to_h
+    keys = relationShipHash.keys
+    before_keys =
+    case proximity
+    when :before
+      key==keys.first ? [[], keys] : keys.slice_before { |k| k == key }
+    when :after
+      keys.slice_after { |k| k == key }
+    end.first
+    relationShipHash.select { |k,_| before_keys.include? k }.
+      update(pair).
+      update(relationShipHash.reject { |k,_| before_keys.include? k })
+  end  
+
+  def refineRelationShips(hasRelationShips, positionToCheckWord, word, debug)
+    puts "#{__LINE__}#{debug}/function refineRelationShips hasRelationShips: #{hasRelationShips.inspect} word: #{word}" if @debugSyntax
+    newHasRelationShips = hasRelationShips.clone 
+
+    orsFound = newHasRelationShips.keys.select {|k| k.include? "OR"}
+    puts "#{__LINE__}#{debug}|-ORs Found: #{orsFound} length: #{orsFound.length}" if @debugSyntax
+
+    relationFound = newHasRelationShips.keys.select {|k| k.include? "RELATION"}
+    puts "#{__LINE__}#{debug}|-relationFound: #{relationFound} length: #{relationFound.length}" if @debugSyntax
+
+    ifFound = newHasRelationShips.keys.select {|k| k.include? "IF"}
+    puts "#{__LINE__}#{debug}|-ifFound: #{ifFound} length: #{ifFound.length}" if @debugSyntax
+
+    puts "#{__LINE__}#{debug}|-newHasRelationShips.values[#{positionToCheckWord}]: #{newHasRelationShips.values[positionToCheckWord]} word: #{word}" if @debugSyntax
+    puts "#{__LINE__}#{debug}|-newHasRelationShips.keys[#{positionToCheckWord}]: #{newHasRelationShips.keys[positionToCheckWord]} word: #{word}" if @debugSyntax
+    if newHasRelationShips.values[positionToCheckWord] == word
+      puts "#{__LINE__}#{debug}|-#{newHasRelationShips.keys[positionToCheckWord]} ==  #{word}" if @debugSyntax
+      if newHasRelationShips.keys[positionToCheckWord].include?("IF")
+        puts "#{__LINE__}#{debug}|-IF found" if @debugSyntax
+        puts "#{__LINE__}#{debug}|-newHasRelationShips.keys[#{positionToCheckWord}]: #{newHasRelationShips.keys[positionToCheckWord]} word: #{word}" if @debugSyntax
+      elsif newHasRelationShips.keys[positionToCheckWord].include?("OR")
+        puts "#{__LINE__}#{debug}|-OR found" if @debugSyntax
+        puts "#{__LINE__}#{debug}|-newHasRelationShips.keys[#{positionToCheckWord}]: #{newHasRelationShips.keys[positionToCheckWord]} word: #{word}" if @debugSyntax
+      end
+    else
+      puts "#{__LINE__}#{debug}|-#{newHasRelationShips.keys[positionToCheckWord]} ==  #{word}" if @debugSyntax
+      if newHasRelationShips.keys[positionToCheckWord].include?("IF")
+        puts "#{__LINE__}#{debug}|-IF found" if @debugSyntax
+        puts "#{__LINE__}#{debug}|-newHasRelationShips.keys[#{positionToCheckWord}]: #{newHasRelationShips.keys[positionToCheckWord]} word: #{word}" if @debugSyntax
+        ifNumber = newHasRelationShips.keys[positionToCheckWord].gsub("IF","")
+        puts "#{__LINE__}#{debug}|-IF found?: #{newHasRelationShips.keys[positionToCheckWord]} number: #{ifNumber}" if @debugSyntax
+        puts "#{__LINE__}#{debug}|-IF found?: #{newHasRelationShips[newHasRelationShips.keys[positionToCheckWord]].values} number: #{ifNumber}" if @debugSyntax
+        findWordInIF = newHasRelationShips[newHasRelationShips.keys[positionToCheckWord]].values.find {|v| v.include? "#{word}"}
+        findWordInELSE = newHasRelationShips["ELSE#{ifNumber}"].values.find {|v| v.include? "#{word}"}
+        puts "#{__LINE__}#{debug}|--findWordInIF: #{findWordInIF}" if @debugSyntax
+        puts "#{__LINE__}#{debug}|--findWordInELSE: #{findWordInELSE}" if @debugSyntax
+        if !findWordInIF.nil?  # THEN+number
+          puts "#{__LINE__}#{debug}|---add content of IF in newHasRElationShips: #" if @debugSyntax
+
+          getRelationShips = hasRelationShips["IF#{ifNumber}"]
+          if getRelationShips.is_a?(Hash)
+            clone_getRelationShips = getRelationShips.clone
+            getRelationShips.each_with_index do |(gRel, gRelValue), gIndex|
+              rels = newHasRelationShips.keys.select {|k| k == gRel}
+              while rels.length > 0
+                old_gRel = gRel
+                gRel = (gRel.to_i + 1).to_s
+                clone_getRelationShips = insertNewRelationShip(clone_getRelationShips, clone_getRelationShips.keys[gIndex], Hash["#{gRel}","#{gRelValue}"], :after)
+                clone_getRelationShips.delete(old_gRel)
+                rels = newHasRelationShips.keys.select {|k| k.include? gRel}
+              end
+            end
+            getRelationShips = clone_getRelationShips
+          end
+          puts "#{__LINE__}#{debug}|-getRelationShips: #{getRelationShips} " if @debugSyntax
+  
+          newHasRelationShips = insertNewRelationShip(newHasRelationShips, "IF#{ifNumber}", getRelationShips, :after)
+          puts "#{__LINE__}#{debug}|---newHasRelationsShips: #{newHasRelationShips.inspect}" if @debugSyntax
+          findWord = hasRelationShips["THEN#{ifNumber}"].values.find {|k| k.include? "#{word}"}
+          puts "#{__LINE__}#{debug}|---then findWordInIF: #{findWordInIF}" if @debugSyntax
+          
+          puts "#{__LINE__}#{debug}|---add content of THEN in newHasRElationShips: #" if @debugSyntax
+
+          getRelationShips = hasRelationShips["THEN#{ifNumber}"]
+          if getRelationShips.is_a?(Hash)
+            clone_getRelationShips = getRelationShips.clone
+            getRelationShips.each_with_index do |(gRel, gRelValue), gIndex|
+              rels = newHasRelationShips.keys.select {|k| k == gRel}
+              while rels.length > 0
+                old_gRel = gRel
+                gRel = (gRel.to_i + 1).to_s
+                clone_getRelationShips = insertNewRelationShip(clone_getRelationShips, clone_getRelationShips.keys[gIndex], Hash["#{gRel}","#{gRelValue}"], :after)
+                clone_getRelationShips.delete(old_gRel)
+                rels = newHasRelationShips.keys.select {|k| k.include? gRel}
+              end
+            end
+            getRelationShips = clone_getRelationShips
+          end
+          puts "#{__LINE__}#{debug}|-getRelationShips: #{getRelationShips} " if @debugSyntax
+  
+          newHasRelationShips = insertNewRelationShip(newHasRelationShips, "THEN#{ifNumber}", getRelationShips, :after)
+          puts "#{__LINE__}#{debug}|---newHasRelationsShips: #{newHasRelationShips.inspect}" if @debugSyntax
+          newHasRelationShips.delete("IF#{ifNumber}")
+          newHasRelationShips.delete("THEN#{ifNumber}")
+          newHasRelationShips.delete("ELSE#{ifNumber}")
+        else               # ELSE+number
+          puts "#{__LINE__}#{debug}|-IF found?: #{newHasRelationShips.keys[positionToCheckWord]} number: #{ifNumber}" if @debugSyntax
+
+          getRelationShips = hasRelationShips["ELSE#{ifNumber}"]
+          if getRelationShips.is_a?(Hash)
+            clone_getRelationShips = getRelationShips.clone
+            getRelationShips.each_with_index do |(gRel, gRelValue), gIndex|
+              rels = newHasRelationShips.keys.select {|k| k == gRel}
+              while rels.length > 0
+                old_gRel = gRel
+                gRel = (gRel.to_i + 1).to_s
+                clone_getRelationShips = insertNewRelationShip(clone_getRelationShips, clone_getRelationShips.keys[gIndex], Hash["#{gRel}","#{gRelValue}"], :after)
+                clone_getRelationShips.delete(old_gRel)
+                rels = newHasRelationShips.keys.select {|k| k.include? gRel}
+              end
+            end
+            getRelationShips = clone_getRelationShips
+          end
+          puts "#{__LINE__}#{debug}|-getRelationShips: #{getRelationShips} " if @debugSyntax
+  
+          newHasRelationShips = insertNewRelationShip(newHasRelationShips, "ELSE#{ifNumber}", getRelationShips, :after)
+          findWord = hasRelationShips["ELSE#{ifNumber}"].values.find {|k| k.include? "#{word}"}
+          puts "#{__LINE__}#{debug}|---else findWordInELSE: #{findWordInELSE}" if @debugSyntax
+          puts "#{__LINE__}#{debug}|---newHasRelationsShips: #{newHasRelationShips.inspect}" if @debugSyntax
+          newHasRelationShips.delete("IF#{ifNumber}")
+          newHasRelationShips.delete("THEN#{ifNumber}")
+          newHasRelationShips.delete("ELSE#{ifNumber}")
+        end
+        puts "#{__LINE__}#{debug}|---returning newHasRelationsShips: #{newHasRelationShips.inspect}" if @debugSyntax
+        puts "#{__LINE__}#{debug}\\function refineRelationShips" if @debugSyntax
+        return newHasRelationShips
+ 
+      elsif newHasRelationShips.keys[positionToCheckWord].include?("OR")
+        puts "#{__LINE__}#{debug}|-OR found" if @debugSyntax
+        puts "#{__LINE__}#{debug}|-newHasRelationShips.keys[#{positionToCheckWord}]: #{newHasRelationShips.keys[positionToCheckWord]} word: #{word}" if @debugSyntax
+        keyToDelete = newHasRelationShips.keys[positionToCheckWord]
+        newHasRelationShips.values[positionToCheckWord].values.find { |v| v.include? "#{word}"}
+        puts "#{__LINE__}#{debug}|-newHasRelationShips.values[positionToCheckWord].values.find { |v| v.include word}: #{newHasRelationShips.values[positionToCheckWord].select { |k,v| v.include? word}}" if @debugSyntax
+        puts "#{__LINE__}#{debug}|-newHasRelationShips.values[positionToCheckWord]: #{newHasRelationShips.values[positionToCheckWord]}" if @debugSyntax
+        wordInOR = newHasRelationShips.values[positionToCheckWord].select { |k,v| v.include? "#{word}"}
+        if !wordInOR.empty?
+          puts "#{__LINE__}#{debug}|-word found in OR" if @debugSyntax
+          newHasRelationShips = insertNewRelationShip(newHasRelationShips, newHasRelationShips.keys[positionToCheckWord], wordInOR, :after)
+          newHasRelationShips.delete(newHasRelationShips.keys[positionToCheckWord])
+          puts "#{__LINE__}#{debug}|---returning newHasRelationsShips: #{newHasRelationShips.inspect}" if @debugSyntax
+          puts "#{__LINE__}#{debug}\\function refineRelationShips" if @debugSyntax
+          return newHasRelationShips
+
+        else
+          puts "#{__LINE__}#{debug}|-word not found in OR checking relations" if @debugSyntax
+          puts "#{__LINE__}#{debug}|-newHasRelationShips.keys[positionToCheckWord]: #{newHasRelationShips.keys[positionToCheckWord]} " if @debugSyntax
+          relationShip = newHasRelationShips.values[positionToCheckWord] 
+          puts "#{__LINE__}#{debug}|-relationShip: #{relationShip}" if @debugSyntax
+          relShip = Hash.new
+          rels = relationShip.keys.select { |k,v| k.include? "RELATION"}
+          puts "#{__LINE__}#{debug}|-#{rels.inspect}"
+          rels.each do |rel|
+            puts "#{__LINE__}#{debug}|-#{rel}"
+            relShip.store(rel, relationShip[rel])
+          end
+          puts "#{__LINE__}#{debug}|-#{relShip.inspect}"
+          newHasRelationShips_ = newHasRelationShips.clone
+          rels.each_with_index do |rel, index|
+            relationShip_ = refineRelationShips(relShip, 0, word, debug)
+            puts "#{__LINE__}#{debug}|-relationShip after Refine: #{relationShip}" if @debugSyntax
+#            getRelationShips = @syntax.getRelationships(relationShip)
+#            puts "#{__LINE__}#{debug}|-getRelationShips: #{getRelationShips} " if @debugSyntax
+            newHasRelationShips_ = insertNewRelationShip(relationShip, relationShip.keys[index], relationShip_, :after)
+            newHasRelationShips_.delete(relationShip.keys[index])
+#            puts "#{__LINE__}#{debug}|-getRelationShips: #{getRelationShips.inspect}" if @debugSyntax
+            end
+          newHasRelationShips = insertNewRelationShip(newHasRelationShips, keyToDelete, newHasRelationShips_, :after)
+          newHasRelationShips.delete(newHasRelationShips.keys[positionToCheckWord])
+          puts "#{__LINE__}#{debug}|---returning newHasRelationsShips: #{newHasRelationShips.inspect}" if @debugSyntax
+          puts "#{__LINE__}#{debug}\\function refineRelationShips" if @debugSyntax
+          return newHasRelationShips
+
+        end                                                                        
+
+      elsif newHasRelationShips.keys[positionToCheckWord].include?("RELATION")
+        puts "#{__LINE__}#{debug}|-relationFound.length > 0" if @debugSyntax
+        puts "#{__LINE__}#{debug}|-newHasRelationShips[positionToCheckWord]: #{newHasRelationShips.keys[positionToCheckWord]} " if @debugSyntax
+        relationShip = newHasRelationShips.values[positionToCheckWord] 
+        getRelationShips = @syntax.getRelationships(relationShip)
+        # get all keys from newHasRelationShip and if found in gerRelationShips increment them
+        if getRelationShips.is_a?(Hash)
+          clone_getRelationShips = getRelationShips.clone
+          getRelationShips.each_with_index do |(gRel, gRelValue), gIndex|
+            rels = newHasRelationShips.keys.select {|k| k == gRel}
+            while rels.length > 0
+              old_gRel = gRel
+              gRel = (gRel.to_i + 1).to_s
+              clone_getRelationShips = insertNewRelationShip(clone_getRelationShips, clone_getRelationShips.keys[gIndex], Hash["#{gRel}","#{gRelValue}"], :after)
+              clone_getRelationShips.delete(old_gRel)
+              rels = newHasRelationShips.keys.select {|k| k.include? gRel}
+            end
+          end
+          getRelationShips = clone_getRelationShips
+        end
+        puts "#{__LINE__}#{debug}|-getRelationShips: #{getRelationShips} " if @debugSyntax
+        newHasRelationShips = insertNewRelationShip(newHasRelationShips, newHasRelationShips.keys[positionToCheckWord], getRelationShips, :after)
+        newHasRelationShips.delete(newHasRelationShips.keys[positionToCheckWord])
+        puts "#{__LINE__}#{debug}|-getRelationShips: #{getRelationShips.inspect}" if @debugSyntax
+        puts "#{__LINE__}#{debug}|---returning newHasRelationsShips: #{newHasRelationShips.inspect}" if @debugSyntax
+        puts "#{__LINE__}#{debug}\\function refineRelationShips" if @debugSyntax
+        return newHasRelationShips
+
+      end
+    end
+    puts "#{__LINE__}#{debug}|---returning hasRelationsShips: #{hasRelationShips.inspect}" if @debugSyntax
+    puts "#{__LINE__}#{debug}\\function refineRelationShips hasRelationShips: #{hasRelationShips.inspect} word: #{word}" if @debugSyntax
+    return hasRelationShips 
+
+  end
+
+  def checkSyntanx(tempFileContent)
+    typeOfKeyword = "K_NA"  #Keyword notAvailable  
+    typeOfOperand = "O_NA"  #Operand notAvailable  
+    typeOfRelation = "R_NA" #Relationship notAvailable  
+
+    nextIdentifier = false
+    nextString = false
+    nextCompound2BeFound = false
+    nextWord = ""
+    includeFiles = Hash.new
+    includeFilesIndex = -1
+    functionDefinitions = Hash.new
+    functionDefinitionsIndex = -1
+    variables = Hash.new
+    variableIndex = -1
+    syntaxLevelFlow = Hash.new 
+    syntaxLevelFlowIndex = -1
+    syntaxRelations = Hash.new
+    syntaxRelationsIndex = 0
+    syntaxRelationsIndexStack = Array.new
+    syntaxRelationsTAGsStack = Array.new
+    checkingSyntaxRelations = false
+    syntaxforbidenRelations = Hash.new
+    syntaxRelationsOR = Hash.new
+    forbidenRelations = Hash.new
+    syntaxOK = true
+    isError = "true"
+    isActivated = {                          
+                    "T_INCLUDE" => false,
+                    "T_VAR"     => false,
+                    "T_DEF"     => false,
+                    "T_FOR"     => false,
+                    "T_FOREACH" => false,
+                    "T_IF"      => false,
+                    "T_ELSE"    => false,
+                    "T_ELSEIF"  => false,
+                    "T_DO"      => false,
+                    "T_PUTS"    => false,
+                    "T_RETURN"  => false
+                  }                            
+
+    #puts tempFileContent
+    fileContent = File.open(tempFileContent).read        #open file tempFileContent for each which is a translation of the source
+    fileContent.gsub!(/\r\n?/,"\n")                      #replace all \r\n with \n only 
+    word = ""
+    aux_word = ""
+    lastWord = ""
+    syntaxWordIndex = 0
+    hasRelationsShips = "R_NA"
+    puts "#{__LINE__} fileContent.each_line Begin -------" if @debugSyntax
+    fileContent.each_line.with_index do |line, lineNumber|  #for each line do the block below
+      puts "\n#{__LINE__}/fileContent.each_line Inside Begin LineNumber:#{lineNumber}---------------------------------------------------------------------------------" if @debugSyntax
+      if lineNumber == 17
+        puts "LINE 17"
+      end
+      wordsFromLine = line.split(" ")                       #split line in chars
+      word = ""
+      aux_word = ""
+      word_idx = 0
+      isCompound = false
+      isActivated = {
+                      "T_INCLUDE" => false,
+                      "T_DEF"     => false,
+                      "T_FOR"     => false,
+                      "T_FOREACH" => false,
+                      "T_IF"      => false,
+                      "T_ELSE"    => false,
+                      "T_ELSEIF"  => false,
+                      "T_DO"      => false,
+                      "T_PUTS"    => false,
+                      "T_RETURN"  => false
+                    }
+      
+      compoundString = ""
+      isTypeOfConst = {
+                        "type" => "",
+                        "value" => false
+                      }
+                       
+      puts "#{__LINE__}|-CurrentLine: #{line}" if @debugSyntax
+      puts "#{__LINE__}|-#{wordsFromLine} length #{wordsFromLine.length}" if @debugSyntax
+      puts "#{__LINE__}|-word_idx < wordsFromLine.length ) do Begin" if @debugSyntax
+      hasRelationShips = nil
+
+      while ( word_idx < wordsFromLine.length ) do          #parce each char until end of line
+        word = wordsFromLine[word_idx]
+        puts "#{__LINE__}|--+++ NEW WORD:>#{word}< wordsFromLine[#{word_idx}]:>#{wordsFromLine[word_idx]}< aux_word:>#{aux_word}<" if @debugSyntax
+
+        hasRelationShips = @syntax.getRelationships(word)
+        puts "#{__LINE__}|--+   hasRelationShips: #{hasRelationShips}" if @debugSyntax
+        if !aux_word.empty?
+          puts "#{__LINE__}|-- word: #{word} and aux_word #{aux_word} are connected" if @debugSyntax
+          aux_word = ""
+        else 
+          if (hasRelationShips != "R_NA")                     #syntaxLevelFlow store and increment index
+            puts "#{__LINE__}|---+  hasRelationShips != \"R_NA\" word: #{word}" if @debugSyntax
+
+            #should be indexed and stored in the apropriate structures... TBC
+            case word
+            when "T_VAR"
+              variableIndex = variableIndex + 1
+
+            when "T_INCLUDE"
+              includeFilesIndex = includeFilesIndex + 1
+
+            when "T_DEF"
+              functionDefinitionsIndex = functionDefinitionsIndex + 1
+
+            end
+            if (syntaxLevelFlowIndex > -1)
+              syntaxRelationsIndexStack.insert(syntaxLevelFlowIndex, syntaxWordIndex)
+              syntaxWordIndex = 0
+            end 
+
+            syntaxLevelFlowIndex = syntaxLevelFlowIndex + 1
+            syntaxLevelFlow.store(syntaxLevelFlowIndex, hasRelationShips)
+            puts "#{__LINE__}|---syntaxLevelFlow: #{syntaxLevelFlow.inspect}" if @debugSyntax
+
+          else #(hasRelationsShips != "R_NA")                #use syntaxLevelFlow relations
+            puts "#{__LINE__}|---hasRelationShips == \"R_NA\" word: #{word}" if @debugSyntax
+            puts "#{__LINE__}|---syntaxLevelFlow: #{syntaxLevelFlow.inspect}" if @debugSyntax
+
+            # refine relationship based on the if structure or relation
+            syntaxLevelFlowBack = syntaxLevelFlow[syntaxLevelFlowIndex].clone
+            puts "#{__LINE__}|---syntaxLevelFlowBack: #{syntaxLevelFlowBack}" if @debugSyntax
+            puts "#{__LINE__}|---syntaxWordIndex: #{syntaxWordIndex}" if @debugSyntax
+            puts "#{__LINE__}|---syntaxLevelFlowIndex: #{syntaxLevelFlowIndex}" if @debugSyntax
+
+            # refine begin
+            newSyntaxLevelFlow = refineRelationShips(syntaxLevelFlow[syntaxLevelFlowIndex], syntaxWordIndex, word, "|---")
+            puts "#{__LINE__}|---newSyntaxLevelFlow: #{newSyntaxLevelFlow}" if @debugSyntax
+            syntaxLevelFlow.delete(syntaxLevelFlowIndex)
+            syntaxLevelFlow.store(syntaxLevelFlowIndex, newSyntaxLevelFlow) #refineRelationShips(syntaxLevelFlow[syntaxLevelFlowIndex], word,"|---") 
+            # refine ended
+            
+            puts "#{__LINE__}|---syntaxLevelFlow[syntaxLevelFlowIndex].values[syntaxWordIndex] syntaxLevelFlow[#{syntaxLevelFlowIndex}].values[#{syntaxWordIndex}]: #{syntaxLevelFlow[syntaxLevelFlowIndex].values[syntaxWordIndex]} word: #{word}" if @debugSyntax
+            puts "#{__LINE__}|---syntaxLevelFlow[#{syntaxLevelFlowIndex}]: syntaxLevelFlowBack: #{syntaxLevelFlowBack} relaced with #{syntaxLevelFlow[syntaxLevelFlowIndex]}" if @debugSyntax
+            puts "#{__LINE__}|---has syntaxLevelFlow[#{syntaxLevelFlowIndex}] been changed?: syntaxLevelFlowBack == syntaxLevelFlow[syntaxLevelFlowIndex] #{syntaxLevelFlowBack == syntaxLevelFlow[syntaxLevelFlowIndex]}" if @debugSyntax
+           
+            # subRelationShip = findWordInRelationShip(word, syntaxLevelFlow[syntaxLevelFlowIndex],"|---")
+            subRelationShip = syntaxLevelFlow[syntaxLevelFlowIndex].keys[syntaxWordIndex]
+            
+            #subRelationShip = findWordInRelationShip(word, syntaxLevelFlow[syntaxLevelFlowIndex],"|---")
+            puts "#{__LINE__}|---subRelationShip: #{subRelationShip}" if @debugSyntax
+
+            if subRelationShip != "R_NA"
+              puts "#{__LINE__}|---syntaxLevelFlow[syntaxLevelFlowIndex].values[syntaxWordIndex] syntaxLevelFlow[#{syntaxLevelFlowIndex}].values[#{syntaxWordIndex}]: #{syntaxLevelFlow[syntaxLevelFlowIndex].values[syntaxWordIndex]} word: #{word}" if @debugSyntax
+              
+              if !syntaxLevelFlow[syntaxLevelFlowIndex].values[syntaxWordIndex].is_a?(Hash)
+                puts "#{__LINE__}|----:syntaxLevelFlow[#{syntaxLevelFlowIndex}].values[#{syntaxWordIndex}] #{syntaxLevelFlow[syntaxLevelFlowIndex].values[syntaxWordIndex]}" if @debugSyntax
+                if syntaxLevelFlow[syntaxLevelFlowIndex].values[syntaxWordIndex] != word
+                  puts "#{__LINE__}|-CurrentLine: #{line}" if @debugSyntax
+                  return {:errorType => "SYNTAX_ERROR", :line => lineNumber, :word => word_idx}
+                end
+              else
+                #in this case we have a has which will be parsed according to subRelationShip
+                puts "#{__LINE__}|----subRelationShip is HASH: #{subRelationShip}" if @debugSyntax
+              end
+
+              case subRelationShip 
+              when "END"
+                puts "#{__LINE__}|---- decrementing syntaxLevelFlowIndex: #{syntaxLevelFlowIndex}" if @debugSyntax
+                isTypeOfConst["type"] = ""
+                isTypeOfConst["value"] = false
+                syntaxLevelFlow.delete(syntaxLevelFlow.keys[syntaxLevelFlowIndex])
+                syntaxLevelFlowIndex = syntaxLevelFlowIndex - 1
+                if syntaxLevelFlowIndex > -1 
+                  syntaxWordIndex = syntaxRelationsIndexStack.pop
+                  syntaxWordIndex = syntaxWordIndex - 1
+                else 
+                  syntaxWordIndex = -1 
+                end
+
+              when /OR/ 
+                puts "#{__LINE__}|---- OR subrelationShip" if @debugSyntax
+                puts "#{__LINE__}|---- decrementing syntaxLevelFlowIndex: #{syntaxLevelFlowIndex}" if @debugSyntax
+                isConst = @syntax.isTypeOfConst?(word)
+                if (isConst)
+                  isTypeOfConst["type"] = word
+                  isTypeOfConst["value"] = isConst 
+                end
+
+                case word
+                when "I_VALUE"
+                  puts "#{__LINE__}|----isTypeOfConst?(#{word}): #{isTypeOfConst["type"]}, #{isTypeOfConst["value"]}" if @debugSyntax
+
+                when "S_VALUE"
+                  puts "#{__LINE__}|----isTypeOfConst?(#{word}): #{isTypeOfConst["type"]}, #{isTypeOfConst["value"]}" if @debugSyntax
+                
+                when "O_OPEN_CLOSE_COMPOUND"
+                  isCompound = toggle(isCompound)
+                  if (!isCompound)
+                    puts "#{__LINE__}|----COMPOUND word:>#{compoundString}<" if @debugSyntax
+                    if (isTypeOfConst["value"])
+                      puts "#{__LINE__}|-----#{compoundString} is #{isTypeOfConst["type"]}"  if @debugSyntax
+                    end
+                  end
+
+                end
+                aux_word = word
+                puts "#{__LINE__}|----NewAuxWord:>#{aux_word}<" if @debugSyntax
+
+              when "0".."9"
+                case word
+                when "I_VALUE"
+                  aux_word = word
+                when "S_VALUE"
+                  aux_word = word
+                when "O_OPEN_CLOSE_COMPOUND"
+                  isCompound = toggle(isCompound)
+                  if (!isCompound)
+                    puts "#{__LINE__}|----COMPOUND word:>#{compoundString}<" if @debugSyntax
+                    if (isTypeOfConst["value"])
+                      puts "#{__LINE__}|-----#{compoundString} is #{isTypeOfConst["type"]}" if @debugSyntax
+                    end
+                  end
+                end
+              end
+
+              syntaxWordIndex = syntaxWordIndex + 1
+            else 
+              #identifiers and strings should be stored in the apropriate structures TBC
+              puts "#{__LINE__}|----R_NA subrelationShip" if @debugSyntax
+              if (isTypeOfConst["value"] and !isCompound)
+                puts "#{__LINE__}|----- #{word} is #{isTypeOfConst["type"]}" if @debugSyntax
+              end
+              if (isTypeOfConst["value"] and isCompound)
+                if (!@syntax.isTypeOfConst?(word))
+                  if (compoundString == "")
+                    compoundString = word
+                  else
+                    compoundString = compoundString + " " + word
+                  end
+                end
+              end  
+            end
+
+          end #(hasRelationsShips != "R_NA")
+        end
+        word_idx = word_idx + 1
+      end
+      puts "#{__LINE__}|-CurrentLine: #{line}" if @debugSyntax
+      puts "#{__LINE__}\\fileContent.each_line Inside End LineNumber:#{lineNumber}--------------------------------------------------------------------------------------\n" if @debugSyntax
+    end
+  end
+end #class SyntaxChecker
+
+end #module RubyScript2CAPLConverter

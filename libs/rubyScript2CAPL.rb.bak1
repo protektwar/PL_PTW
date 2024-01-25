@@ -1,0 +1,696 @@
+require_relative 'rubyScript2CAPLConverter/version'
+require_relative 'rubyScript2CAPLConverter/syntax.rb'
+
+module RubyScript2CAPLConverter
+
+class Converter
+  attr_accessor :keywords, :error, :errorList, :specialChar
+  attr_accessor :includeFiles, :functionNames, :variableNames
+
+  def initialize()
+    puts "Script2CAPLConverter"
+    puts "Version: #{VERSION}"
+    @keywords = Syntax.new()
+    @includeFiles = Array.new
+    @functionNames = Hash.new # {"functionName" => {0 => "param1", 1 => "param2"}
+    @variableNames = Array.new
+    @error = Hash.new #{ "Error Name" => {0 => "Linenumber",     1 => "whatkindoferror",       2 => "awaiting values are"               }
+                      #    generated         codeGenerated      key@errorList=>0 or 1       generated based on relations
+    @errorList = {0 => "not a relationship", 1 => "forbidenRelation" }
+    @specialChar = [
+                      "(", 
+                      ")",
+                      "[",
+                      "]",
+                      "{",
+                      "}",
+                      ";",
+                      ":",
+                      ",",
+                      #".",
+                      "\"",
+                      "'",
+                      "_",
+                      "-",
+                      "+",
+                      "=",
+                      "?",
+                      " ",
+                      "#",
+                      "|",
+                      "<",
+                      ">",
+                      "\/",
+                      "\\",
+                      "~",
+                      "!",
+                      "@",
+                      "$",
+                      "%",
+                      "^",
+                      "&",
+                      "*",
+                      "\n",
+                      "\t",
+                      "\r"
+                   ]
+  end
+    
+  def convertAndCheckSyntax(file2Convert)
+    parseAndTranslateToSyntaxSimbols(file2Convert)
+    @error = checkSyntanx("tempFileContent.translated")
+    if ( !@error )
+      return @error
+    end
+  end
+    
+  def parseAndTranslateToSyntaxSimbols(file2Convert)
+    typeOfToken = "K_NA" #Keyword notAvailable  
+    typeOfOperand = "O_NA" #Operand notAvailable  
+    typeOfRelation = "R_NA" #Relationship notAvailable  
+    
+    openCloseCompound = 0;
+    openCloseBraket = 0;
+    openCloseParant = 0;
+    openCloseBraces = 0;
+    compoundVariable = Array.new
+          
+    fileContent = File.open(file2Convert).read
+    tempFileContent = File.open("tempFileContent.translated","w")
+    
+    fileContent.gsub!(/\r\n?/,"\n")
+      
+    fileContent.each_line do |line|
+    charsFromLine = line.split("")
+        
+    word = ""
+    wordLast = ""
+    specialWord = ""
+    specialWordLast = "" 
+    haveWord = false
+    haveWordOldState = haveWord
+    gotoNextLine = false
+    currentToken = "T_NA"
+    isCompound = false
+        
+    charsFromLine.each_with_index.map do |chr, chr_idx|
+      #puts "New word #{__FILE__}, #{__LINE__}"
+      #puts "current CHAR: #{chr}"
+      if ( gotoNextLine == false )
+        if (specialChar.include?(chr))
+          #puts "SPECIAL! chr -> #{chr} ORD #{chr.ord}"
+          if ( chr == "#" ) 
+            gotoNextLine = true
+            next
+          end
+
+          if ( chr == "\"" )
+            if (!specialWordLast.include?("\\"))
+              openCloseCompound = openCloseCompound + 1
+              if ( (openCloseCompound % 2) == 0 )
+                isCompound = true
+                openCloseCompound = 0
+              end
+            end
+            #puts "\n->openCloseCompound: #{openCloseCompound}<-\n"
+          end 
+
+          if ( ( chr != "\n" ) && ( chr != "\t" ) && ( chr != "\r" ) && ( chr != " " ) )
+            #puts "not \\n and not \\t and not \\r and not space!"
+            specialWord = specialWord + chr
+            haveWord = true
+          else 
+            #puts "\\n and \\t abd \\r and space!"
+            if (openCloseCompound > 0)
+              if ( ( chr == " " ) && ( ( openCloseCompound % 2 ) == 0 ) )
+                #puts "space! and openclosecompound:#{openCloseCompound} % 2 == 0"
+                #specialWord = specialWord + chr
+                word = word +chr
+                #haveWord = true
+              elsif (chr == " ")
+                #puts "space add to word"
+                word = word +chr
+                haveWord = false
+              end
+            elsif ( (chr == " ") && (openCloseCompound == 0) )
+              #puts "space && openCloseCompound == 0 haveWord"
+              haveWord = true                  
+            end
+          end
+          #haveWord = true
+          #puts "!special! #{haveWord}"
+        else #if specialChar.include?(chr) 
+          #puts "notSPECIAL! chr -> #{chr} ORD #{chr.ord}"
+          word = word +chr
+          haveWord = false
+        end #if specialChar.include?(chr)
+            
+        #print "#{chr}"
+        if ( (haveWord == true) && (!word.empty?))
+          #print "Word ->#{word}<-"
+          #puts "haveWord is a Keyword #{word}"
+          aux_word = word.downcase
+          typeOfToken = @keywords.isToken?(aux_word)
+          #puts "haveWord is a Keyword #{typeOfToken}: #{aux_word}"
+          if (typeOfToken != "T_NA")
+            #print typeOfKeyword, "\n"
+            currentToken = typeOfToken
+            tempFileContent.write("#{typeOfToken} ")
+          else # if typeOfToken  != "T_NA"
+            #puts "!= T_NA -> #{typeOfToken} currentToken: #{currentToken}"
+            if ( currentToken != "T_NA" )
+              #puts "!= T_NA openCloseCompound: #{openCloseCompound}"  
+              if ( ( openCloseCompound == 0 ) && ( isCompound == true ) )
+                #puts "( openCloseCompound == 0 ) && ( isCompound == true ) S_VALUE #{aux_word} alphanumeric? ->#{@keywords.isAlphaNumeric?(aux_word)}<-"
+                tempFileContent.write("S_VALUE #{aux_word} ")
+                isCompound = false
+              elsif ( ( openCloseCompound == 0 ) && ( isCompound == false ) )
+                #puts "( openCloseCompound == 0 ) && ( isCompound == false ) #{aux_word} alphanumeric? ->#{@keywords.isAlphaNumeric?(aux_word)}<-"
+                if (@keywords.isNumeric?(aux_word))
+                  #puts "aux_word #{aux_word} is alphanumeric"
+                  #puts "isAlphaNumeric? #{@keywords.isAlphaNumeric?(aux_word)} write to file: N_VALUE #{aux_word}"
+                  tempFileContent.write("N_VALUE #{aux_word} ")
+                elsif @keywords.isAlphaNumeric?(aux_word)
+                  #puts "isAlphaNumeric? #{@keywords.isAlphaNumeric?(aux_word)} write to file: I_VALUE #{aux_word}"
+                  tempFileContent.write("I_VALUE #{aux_word} ")
+                end
+              end
+            else # if currentToken != "T_NA"
+              #puts "currentToken == T_NA"
+              if ( ( openCloseCompound == 0 ) && ( isCompound == true ) )
+                #puts "( openCloseCompound == 0 ) && ( isCompound == true ) S_VALUE #{aux_word} alphanumeric? ->#{@keywords.isAlphaNumeric?(aux_word)}<-"
+                tempFileContent.write("S_VALUE #{aux_word} ")
+                isCompound = false
+              elsif ( ( openCloseCompound == 0 ) && ( isCompound == false ) )
+                #puts "( openCloseCompound == 0 ) && ( isCompound == false ) #{aux_word} alphanumeric? ->#{@keywords.isAlphaNumeric?(aux_word)}<-"
+                if (@keywords.isNumeric?(aux_word))
+                  #puts "aux_word #{aux_word} is alphanumeric"
+                  #puts "isAlphaNumeric? #{@keywords.isAlphaNumeric?(aux_word)} write to file: N_VALUE #{aux_word}"
+                  tempFileContent.write("N_VALUE #{aux_word} ")
+                elsif @keywords.isAlphaNumeric?(aux_word)
+                  #puts "isAlphaNumeric? #{@keywords.isAlphaNumeric?(aux_word)} write to file: I_VALUE #{aux_word}"
+                  tempFileContent.write("I_VALUE #{aux_word} ")
+                end
+              end
+            end #if currentToken != "T_NA"
+          end # if typeOfToken  != "T_NA"
+          wordLast = word
+          word = ""
+        else #if ( (haveWord == true) && (!word.empty?))
+          #print "Word ->EMPTY? ->#{word}<-\n"
+          if ( !word.empty? )
+            #puts "notEMPTY! W:->#{word}<- SW:->#{specialWord}<-"
+            #puts "#{chr_idx} #{line.length-1}"
+            if (chr_idx == line.length-1)
+              #print "#{word}"
+              #puts "End word is a Keyword #{word}"
+              aux_word = word.downcase
+              typeOfToken = @keywords.isToken?(aux_word)
+              #puts "End word is a Keyword #{typeOfToken}: #{aux_word}"
+              if (typeOfToken != "T_NA")
+                #print "typeOfToken != T_NA #{typeOfKeyword} \n"
+                tempFileContent.write("#{typeOfToken} ")
+              else
+                #puts "!= T_NA -> #{typeOfToken} currentToken: #{currentToken}"
+                if ( currentToken != "T_NA" )
+                  #puts "!= T_NA openCloseCompound: #{openCloseCompound}"
+                  if (openCloseCompound == 0)
+                    if (@keywords.isAlphaNumeric?(aux_word))
+                      #puts "write to file: I_VALUE #{aux_word}"
+                      tempFileContent.write("I_VALUE #{aux_word} ")
+                    end
+                  end
+                end
+              end
+              wordLast = word
+              word = ""
+            end
+          end
+        end#if ( (haveWord == true) && (!word.empty?))
+
+        if ( haveWordOldState != haveWord )
+          #print "|->#{specialWord}<-|"
+          typeOfOperand = @keywords.isOperand?(specialWord)
+          #puts "End word is a Keyword #{typeOfToken}: #{aux_word}"
+          if (typeOfOperand != "O_NA")
+            #print "typeOfOperand != T_NA #{typeOfOperand} \n"
+            tempFileContent.write("#{typeOfOperand} ")
+          end
+          specialWordLast = specialWord
+          specialWord = ""
+          haveWordOldState = haveWord
+        else #if ( haveWordOldState != haveWord )
+          if ( !specialWord.empty? )
+            if (chr_idx == line.length-1)
+              #print "@end|->#{specialWord}<-|"
+              typeOfOperand = @keywords.isOperand?(specialWord)
+              #puts "End word is a Keyword #{typeOfToken}: #{aux_word}"
+              if (typeOfOperand != "O_NA")
+                #print "typeOfOperand != T_NA #{typeOfOperand} \n"
+                tempFileContent.write("#{typeOfOperand} ")
+              end
+              specialWordLast = specialWord
+              specialWord = ""
+            end
+          end
+        end #if ( haveWordOldState != haveWord )
+      end # if ( gotoNextLine == false )
+    end # charsFromLine.each_with_index.map do |chr, chr_idx|
+    #puts ""
+    tempFileContent.write("\n")
+  end
+  tempFileContent.close
+end
+
+  def checkSyntanx(tempFileContent)
+    typeOfKeyword = "K_NA" #Keyword notAvailable  
+    typeOfOperand = "O_NA" #Operand notAvailable  
+    typeOfRelation = "R_NA" #Relationship notAvailable  
+      
+    nextIdentifier = false
+    nextString = false
+    nextCompound2BeFound = false
+    nextWord = ""
+    syntaxLevelFlow = Hash.new 
+    syntaxLevel = 0
+    syntaxRelations = Hash.new
+    syntaxRelationsIndex = 0
+    syntaxRelationsIndexStack = Array.new
+    checkingSyntaxRelations = false
+    syntaxforbidenRelations = Hash.new
+    syntaxRelationsOR = Hash.new
+    forbidenRelations = Hash.new
+    isError = "true"
+
+    #puts tempFileContent
+    fileContent = File.open(tempFileContent).read
+      fileContent.gsub!(/\r\n?/,"\n")
+      word = ""
+      aux_word = ""
+      lastWord = ""
+      hasRelationsShips = "R_NA"
+      puts "#{__LINE__} fileContent.each_line Begin" 
+      fileContent.each_line.with_index do |line, lineNumber|
+        puts "#{__LINE__}!!! fileContent.each_line Inside" 
+        charsFromLine = line.split("")
+        word = ""
+        aux_word = ""
+        chr_idx = 0
+        chr = ""
+        puts "#{__LINE__}\nCurrentLine: #{line} LineNumber:#{lineNumber}"
+        puts "#{__LINE__} #{charsFromLine} length #{charsFromLine.length}"
+        puts "#{__LINE__} while ( chr_idx < charsFromLine.length ) do Begin"
+        while ( chr_idx < charsFromLine.length ) do
+          puts "#{__LINE__} while ( chr_idx < charsFromLine.length ) do Inside"
+          #charsFromLine.each_with_index.map do |chr, chr_idx|
+          chr = charsFromLine[chr_idx]
+          puts "#{__LINE__}!!! chr: ->#{chr}<- -> charsFromLine[#{chr_idx}]: ->#{charsFromLine[chr_idx]}<- word: ->#{word}<- aux_word: ->#{aux_word}<-"
+          if ( ( chr == " " ) && (word != "")) 
+            puts "#{__LINE__} newWord aux_word ->#{aux_word}<- word ->#{word}<- syntaxRelationsIndex: #{syntaxRelationsIndex}"
+          
+            if ( aux_word != "S_VALUE" )
+              aux_word = aux_word + word
+            else 
+              aux_word = word
+            end
+
+            puts "#{__LINE__}!!! aux_word ->#{aux_word}<- word ->#{word}<-"
+            hasRelationShips = @keywords.getRelationships(aux_word)
+            #puts "@keywords.isOperand?(#{word}) #{@keywords.isOperand?(word)} nextCompound2BeFound == false"
+            if ( (!@keywords.isOperand?(word.strip!) ) && ( hasRelationShips != "R_NA" ) && ( nextCompound2BeFound == false ) )
+              puts "#{__LINE__} newWord #{word} is an OPERAND"
+              aux_word = word
+            else
+              puts "#{__LINE__} newWord #{word} is not an OPERAND | nextCompound2BeFound: #{nextCompound2BeFound}"
+              if ( ( nextCompound2BeFound == true ) && ( word != "S_VALUE" ) && ( word != "I_VALUE" ) && ( word != "O_OPEN_CLOSE_COMPOUND") )
+                #aux_word = aux_word + word
+              else
+                aux_word = word
+              end
+            end
+            
+            puts "#{__LINE__}!!! aux_word ->#{aux_word}<- word ->#{word}<-"
+            puts "#{__LINE__} hasRelationShips: #{hasRelationShips}"
+            if ( hasRelationShips != "R_NA" )
+              puts "#{__LINE__}!!! newWord ->#{aux_word}<- if hasRelationShips != R_NA"
+              syntaxLevelFlowAdd = Hash.new
+              syntaxLevelFlowAdd.store(aux_word,hasRelationShips)
+              puts "#{__LINE__} syntaxLevelFlowAdd -> #{syntaxLevelFlowAdd}"
+              syntaxLevelFlow.store(syntaxLevel,syntaxLevelFlowAdd)
+              puts "#{__LINE__} syntaxLevelFlow -> #{syntaxLevelFlow}"
+              #puts "relationShips: #{hasRelationShips}"
+              puts "#{__LINE__} syntaxLevelFlow: #{syntaxLevelFlow}"
+              syntaxLevel = syntaxLevel + 1
+              word = ""
+            else #if ( hasRelationShips != "R_NA" )
+              puts "#{__LINE__}!!! newWord ->#{aux_word}<- hasRelationShips == R_NA"
+              puts "#{__LINE__} nextWord: ->#{nextWord}<-"
+              if ( nextWord == "I_VALUE" )
+                puts "#{__LINE__} I_VALUE ->#{aux_word}<-I_VALUE"
+                #if T_INCLUDE check is I_VALUE value file exist and should be recursively syntax checked
+                #if error exit!
+                word = ""
+                nextWord = ""
+                syntaxRelationsIndex = syntaxRelationsIndex + 1
+                puts "#{__LINE__} syntaxRelationsIndex incremented: #{syntaxRelationsIndex}"
+                checkingSyntaxRelations = false
+                puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"
+                next
+              elsif ( nextWord == "S_VALUE" )
+                puts "#{__LINE__} S_VALUE ->#{aux_word}<-S_VALUE"
+                #if T_INCLUDE check is S_VALUE value file exist and should be recursively syntax checked
+                #if error exit!
+                checkingSyntaxRelations = false
+                puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"
+                nextWord = ""
+                word = ""
+                next
+              elsif ( nextWord == "O_OPEN_CLOSE_COMPOUND" )
+                puts "#{__LINE__} O_OPEN_CLOSE_COMPOUND -> #{aux_word} <- O_OPEN_CLOSE_COMPOUND"
+                nextWord = ""
+                #word = ""
+                if ( nextCompound2BeFound == false ) 
+                  syntaxRelationsIndex = syntaxRelationsIndex + 1
+                  puts "#{__LINE__} syntaxRelationsIndex incremented: #{syntaxRelationsIndex}"
+                end
+                checkingSyntaxRelations = false
+                puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"
+              end
+
+              puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"
+              if ( checkingSyntaxRelations == false ) #is false
+                puts "#{__LINE__}!!! checkingSyntaxRelations == false ->" 
+                puts "#{__LINE__} last from syntaxLevelFlow: #{syntaxLevelFlow[syntaxLevelFlow.keys.last]}"
+                syntaxRelations = syntaxLevelFlow[syntaxLevelFlow.keys.last]
+                puts "#{__LINE__} syntaxRelations when checkingSyntaxRelation is false: #{syntaxRelations}"
+                puts "#{__LINE__} syntaxRelations key: #{syntaxRelations.keys.last}"
+                puts "#{__LINE__} <- checkingSyntaxRelations == false"
+                checkingSyntaxRelations = true
+                puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"
+              end
+              
+              syntaxRelations = syntaxRelations[syntaxRelations.keys.last]
+              puts "#{__LINE__} syntaxRelations before syntaxRelations.is_a?(Hash): #{syntaxRelations.inspect}"
+              if ( syntaxRelations.is_a?(Hash) )
+                puts "#{__LINE__}!!! syntaxRelations is a HASH: #{syntaxRelations.inspect}"
+                puts "#{__LINE__} syntaxRelations.keys[#{syntaxRelationsIndex}]: ->#{syntaxRelations.keys[syntaxRelationsIndex]}<-"
+                puts "#{__LINE__} syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]]: ->#{syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]]}<-"
+                if syntaxRelations.keys[syntaxRelationsIndex] == "OR"
+                  puts "#{__LINE__}!!! OR found"
+                  syntaxRelationsOR = syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]]
+                  puts "#{__LINE__} syntaxRelationsOR: #{syntaxRelationsOR}"
+                  puts "#{__LINE__} syntaxRelationsOR.key(#{aux_word}).nil? #{syntaxRelationsOR.key(aux_word).nil?}"
+                  if (syntaxRelationsOR.key(aux_word).nil?)
+                    puts "#{__LINE__}!!! if (syntaxRelationsOR.key(aux_word).nil?"
+                    puts "#{__LINE__} forCondition #{!syntaxRelationsOR.key("forCondition").nil?}"
+                    puts "#{__LINE__} statement #{!syntaxRelationsOR.key("statement").nil?}"
+                    puts "#{__LINE__} orBlock #{!syntaxRelationsOR.key("orBlock").nil?}"
+                    puts "#{__LINE__} printParameters #{!syntaxRelationsOR.key("printParameters").nil?}"
+                    puts "#{__LINE__} parameters #{!syntaxRelationsOR.key("parameters").nil?}"
+                    puts "#{__LINE__} parameter #{!syntaxRelationsOR.key("parameter").nil?}"
+                    puts "#{__LINE__} expression #{!syntaxRelationsOR.key("expression").nil?}"
+                    puts "#{__LINE__} operand #{!syntaxRelationsOR.key("operand").nil?}"
+                    puts "#{__LINE__} syntaxLevelFlow #{syntaxLevelFlow}"
+                    puts "#{__LINE__} syntaxRelations #{syntaxRelations}"
+
+                    syntaxRelationWord = ""
+                    if !syntaxRelationsOR.key("forCondition").nil?
+                      syntaxRelationWord = "forCondition"
+                    elsif !syntaxRelationsOR.key("statement").nil?
+                      syntaxRelationWord = "statement"
+                    elsif !syntaxRelationsOR.key("orBlock").nil?
+                      syntaxRelationWord = "orBlock"
+                    elsif !syntaxRelationsOR.key("printParameters").nil?
+                      syntaxRelationWord = "printParameters"
+                    elsif !syntaxRelationsOR.key("parameters").nil?
+                      syntaxRelationWord = "parameters"
+                    elsif !syntaxRelationsOR.key("parameter").nil?
+                      syntaxRelationWord = "parameter"
+                    elsif !syntaxRelationsOR.key("expression").nil? 
+                      syntaxRelationWord = "expression"
+                    elsif !syntaxRelationsOR.key("operand").nil?
+                      syntaxRelationWord = "operand"
+                    end 
+                    
+                    if (syntaxRelationWord != "")
+                      puts "#{__LINE__}!!! syntaxRelationWord #{syntaxRelationWord}"
+
+                      hasRelationShips = @keywords.getRelationships(syntaxRelationWord)
+                      if ( hasRelationShips != "R_NA" )
+                        puts "#{__LINE__}!!! ->#{syntaxRelationWord}<- if hasRelationShips != R_NA"
+                        syntaxLevelFlowAdd = Hash.new
+                        syntaxLevelFlowAdd.store(syntaxRelationWord,hasRelationShips)
+                        puts "#{__LINE__} syntaxLevelFlowAdd -> #{syntaxLevelFlowAdd}"
+                        syntaxLevelFlow.store(syntaxLevel,syntaxLevelFlowAdd)
+                        puts "#{__LINE__} syntaxLevelFlow -> #{syntaxLevelFlow}"
+                        puts "#{__LINE__} hasrelationShips: #{hasRelationShips}"
+                        puts "#{__LINE__} syntaxLevelFlow: #{syntaxLevelFlow}"
+                        syntaxLevel = syntaxLevel + 1
+                        checkingSyntaxRelations = false                    
+                        checkingSyntax4Word = true
+                        puts "#{__LINE__} add to stack syntaxRelationsIndex: #{syntaxRelationsIndex}"
+                        syntaxRelationsIndexStack << syntaxRelationsIndex
+                        puts "#{__LINE__} syntaxRelationsIndexStack: #{syntaxRelationsIndexStack}"
+                        syntaxRelationsIndex = 0
+
+                        puts "#{__LINE__} case aux_word:#{aux_word}"
+                        case aux_word
+                        when "S_VALUE"
+                          nextWord = "S_VALUE"
+                          puts "#{__LINE__} nextWord: #{nextWord}"
+                          checkingSyntaxRelations = false
+                          puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"                    
+                        when "I_VALUE"
+                          nextWord = "I_VALUE"
+                          puts "#{__LINE__} nextWord: #{nextWord}"
+                          checkingSyntaxRelations = false
+                          puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"                    
+                          #next word should be checked if file exist
+                          #and not checked for relations
+                        when "O_OPEN_CLOSE_COMPOUND"
+                          puts "#{__LINE__} set nextWord -> O_OPEN_CLOSE_COMPOUND"
+                          if ( nextCompound2BeFound == true )
+                            puts "#{__LINE__} nextCompound2BeFound: #{nextCompound2BeFound}"
+                            nextCompound2BeFound = false
+                            puts "#{__LINE__} nextCompound2BeFound: #{nextCompound2BeFound}"
+                          else
+                            puts "#{__LINE__} nextCompound2BeFound: #{nextCompound2BeFound}"
+                            nextCompound2BeFound = true
+                            puts "#{__LINE__} nextCompound2BeFound: #{nextCompound2BeFound}"
+                          end
+                          nextWord = "O_OPEN_CLOSE_COMPOUND"
+                          puts "#{__LINE__} nextWord: #{nextWord}"
+                          checkingSyntaxRelations = false
+                          puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"                    
+                          #next word should be checked normally and O_OPEN_CLOSE_COMPOUND should be found aster S_VALUE || I_VALUE + string.
+                        end              
+
+                        puts "#{__LINE__} word = \"\""
+                        word = ""                        
+                        next 
+                      else #if ( hasRelationShips != "R_NA" )
+                        puts "#{__LINE__}!!! ERROR ->#{syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]]}<- hasRelationShips == R_NA"
+                      end #if ( hasRelationShips != "R_NA" )
+                    else #if (syntaxRelationWord != "")
+                      puts "#{__LINE__}!!! check if ->#{aux_word}<- is an OPERAND #{@keywords.isInTypeOperand?(aux_word)}"
+                      if ( @keywords.isInTypeOperand?(aux_word) )
+                        puts "#{__LINE__}!!!  #{aux_word} is an OPERAND"
+                        syntaxRelationsIndex = syntaxRelationsIndexStack.pop
+                        syntaxRelationsIndex = syntaxRelationsIndex + 1
+                        puts "#{__LINE__} syntaxRelationsIndex #{syntaxRelationsIndex} popped from syntaxRelationsIndexStack"
+                        syntaxLevelFlow.delete(syntaxLevelFlow.keys.last)
+                        puts "#{__LINE__} syntaxLevelFlow: #{syntaxLevelFlow}"
+                        checkingSyntaxRelations = false
+                        syntaxLevel = syntaxLevel - 1
+                        puts "#{__LINE__} END OF subSYNTAX CHECK!!!\n"
+                        next 
+                      else
+                        puts "#{__LINE__}!!! ERROR #{aux_word} is not an OPERAND"
+                      end                    
+                    end #if (syntaxRelationWord != "")    
+#                   puts "#{__LINE__} ERROR #{aux_word} not found in #{syntaxRelationsOR}"
+#                   return "ERROR #{aux_word} not found in #{syntaxRelationsOR}"
+                  else #if (syntaxRelationsOR.key(aux_word).nil?
+                    case aux_word
+                    when "S_VALUE"
+                      nextWord = "S_VALUE"
+                      puts "#{__LINE__} nextWord: #{nextWord}"
+                      checkingSyntaxRelations = false
+                      puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"                    
+                    when "I_VALUE"
+                      nextWord = "I_VALUE"
+                      puts "#{__LINE__} nextWord: #{nextWord}"
+                      checkingSyntaxRelations = false
+                      puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"                    
+                      #next word should be checked if file exist
+                      #and not checked for relations
+                    when "O_OPEN_CLOSE_COMPOUND"
+                      puts "#{__LINE__} set nextWord -> O_OPEN_CLOSE_COMPOUND"
+                      if ( nextCompound2BeFound == true )
+                        puts "#{__LINE__} nextCompound2BeFound: #{nextCompound2BeFound}"
+                        nextCompound2BeFound = false
+                        puts "#{__LINE__} nextCompound2BeFound: #{nextCompound2BeFound}"
+                      else
+                        puts "#{__LINE__} nextCompound2BeFound: #{nextCompound2BeFound}"
+                        nextCompound2BeFound = true
+                        puts "#{__LINE__} nextCompound2BeFound: #{nextCompound2BeFound}"
+                      end
+                      nextWord = "O_OPEN_CLOSE_COMPOUND"
+                      puts "#{__LINE__} nextWord: #{nextWord}"
+                      checkingSyntaxRelations = false
+                      puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"                    
+                        #next word should be checked normally and O_OPEN_CLOSE_COMPOUND should be found aster S_VALUE || I_VALUE + string.
+                    end
+                  end #if (syntaxRelationsOR.key(aux_word).nil?
+                elsif ( syntaxRelations.keys[syntaxRelationsIndex] == "loop" )
+                  puts "#{__LINE__}!!! syntaxRelations is a loop #{aux_word} == #{syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]]}"  
+                  
+                elsif ( aux_word == syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] )
+                  puts "#{__LINE__}!!! syntaxRelations not OR #{aux_word} == #{syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]]}"
+                  if ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == aux_word )
+                    puts "#{__LINE__}!!! syntaxRelations[syntaxRelations.keys[#{syntaxRelationsIndex}]]: #{syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]]} == aux_word: #{aux_word}"
+                    #syntaxRelationsIndex = syntaxRelationsIndex + 1
+                    #puts "#{__LINE__} syntaxRelationsIndex incremented: #{syntaxRelationsIndex}"
+                    case aux_word
+                    when "O_SEQUENCING_LR"
+                      checkingSyntaxRelations = false
+                      puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"                    
+                      syntaxRelationsIndex = syntaxRelationsIndex - 1
+                      puts "#{__LINE__} syntaxRelationsIndex decremented: #{syntaxRelationsIndex}"
+                    when "O_UNARY_FUNCTIONAL_OPEN_LR"
+                      checkingSyntaxRelations = false
+                      puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"                    
+                      syntaxRelationsIndex = syntaxRelationsIndex + 1
+                      puts "#{__LINE__} syntaxRelationsIndex incremented: #{syntaxRelationsIndex}"
+                    when "S_VALUE"
+                      nextWord = "S_VALUE"
+                      puts "#{__LINE__} nextWord: #{nextWord}"
+                      checkingSyntaxRelations = false
+                      puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"                    
+                    when "I_VALUE"
+                      nextWord = "I_VALUE"
+                      puts "#{__LINE__} nextWord: #{nextWord}"
+                      checkingSyntaxRelations = false
+                      puts "#{__LINE__} checkingSyntaxRelations: #{checkingSyntaxRelations}"                    
+                      #next word should be checked if file exist
+                      #and not checked for relations
+                    end                    
+                  end
+                else  #if syntaxRelations.keys[syntaxRelationsIndex] == "OR"
+                  puts "#{__LINE__}!!! Else OR if syntaxRelations.keys[syntaxRelationsIndex] == \"OR\""    
+                  if  ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == "forCondition" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == "statement" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == "orBlock" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == "printParameters" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == "parameters" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == "parameter" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == "expression" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == "operand" )
+                    puts "#{__LINE__}!!! if 
+                       ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"forCondition\" ) ||
+                       ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"statement\" ) ||
+                       ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"orBlock\" ) ||
+                       ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"printParameters\" ) ||
+                       ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"parameters\" ) ||
+                       ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"parameter\" ) ||
+                       ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"expression\" ) ||
+                       ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"operand\" )"
+                    hasRelationShips = @keywords.getRelationships(syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]])
+                    puts "#{__LINE__}!!! hasRelationShips: #{hasRelationShips}"
+                    if ( hasRelationShips != "R_NA" )
+                      puts "#{__LINE__}!!! ->#{syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]]}<- if hasRelationShips != R_NA"
+                      syntaxLevelFlowAdd = Hash.new
+                      syntaxLevelFlowAdd.store(syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]],hasRelationShips)
+                      puts "#{__LINE__} syntaxLevelFlowAdd -> #{syntaxLevelFlowAdd}"
+                      syntaxLevelFlow.store(syntaxLevel,syntaxLevelFlowAdd)
+                      puts "#{__LINE__} syntaxLevelFlow -> #{syntaxLevelFlow}"
+                      #puts "relationShips: #{hasRelationShips}"
+                      puts "#{__LINE__} syntaxLevelFlow: #{syntaxLevelFlow}"
+                      syntaxLevel = syntaxLevel + 1
+                      checkingSyntaxRelations = false                    
+                      checkingSyntax4Word = true
+                      puts "#{__LINE__} add to stack syntaxRelationsIndex: #{syntaxRelationsIndex}"
+                      syntaxRelationsIndexStack << syntaxRelationsIndex
+                      puts "#{__LINE__} syntaxRelationsIndexStack: #{syntaxRelationsIndexStack.inspect}"
+                      syntaxRelationsIndex = 0
+                      next 
+                    else
+                     puts "#{__LINE__}!!! ERROR ->#{syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]]}<- hasRelationShips == R_NA"
+                    end
+                  else
+                    puts "#{__LINE__}!!! esle of if 
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"forCondition\" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"statement\" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"orBlock\" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"printParameters\" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"parameters\" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"parameter\" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"expression\" ) ||
+                      ( syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]] == \"operand\" )"
+                    puts "#{__LINE__}!!! check if ->#{aux_word}<- is an OPERAND #{@keywords.isInTypeOperand?(aux_word)}"
+                    if ( @keywords.isInTypeOperand?(aux_word) )
+                      puts "#{__LINE__}!!!  #{aux_word} is an OPERAND"
+                      syntaxRelationsIndex = syntaxRelationsIndexStack.pop
+                      puts "#{__LINE__} #{syntaxRelationsIndexStack.inspect}"
+                      puts "#{__LINE__} #{syntaxRelationsIndex.inspect}"
+                      puts "#{__LINE__} syntaxRelationsIndex #{syntaxRelationsIndex} popped from syntaxRelationsIndexStack"
+                      syntaxRelationsIndex = syntaxRelationsIndex + 1
+                      syntaxLevelFlow.delete(syntaxLevelFlow.keys.last)
+                      puts "#{__LINE__} syntaxLevelFlow: #{syntaxLevelFlow}"
+                      checkingSyntaxRelations = false
+                      syntaxLevel = syntaxLevel - 1
+                      puts "#{__LINE__} END OF subSYNTAX CHECK!!!\n"
+                      next 
+                    else
+                      puts "#{__LINE__}!!! ERROR #{aux_word} is not an OPERAND"
+                    end                    
+                  end
+                end #if syntaxRelations.keys[syntaxRelationsIndex] == "OR"
+                if ( ( aux_word == "O_END_OF_STATEMENT" ) && ( syntaxRelationsIndex ==  syntaxRelations.length-1 ) )
+                  puts "#{__LINE__}!!! syntaxRelations not OR #{aux_word} #{syntaxRelationsIndex} - #{syntaxRelations.length-1}"
+                  puts "#{__LINE__} syntaxLevelFlow: #{syntaxLevelFlow}"
+                  puts "#{__LINE__} syntaxLevelFlow.length: #{syntaxLevelFlow.length}"
+                  syntaxLevelFlow.delete(syntaxLevelFlow.keys.last)
+                  puts "#{__LINE__} syntaxLevelFlow: #{syntaxLevelFlow}"
+                  checkingSyntaxRelations = false
+                  syntaxLevel = syntaxLevel - 1
+                  syntaxRelationsIndex = 0
+                  puts "#{__LINE__}!!! END OF SYNTAX CHECK!!!\n"
+                  #chr_idx = chr_idx - 1
+                end
+                #syntaxRelations = syntaxRelations[syntaxRelations.keys[syntaxRelationsIndex]]
+              else 
+                puts "#{__LINE__}!!! syntaxRelations is not a HASH: #{syntaxRelations}"
+              end
+              #if ()
+              #end
+              #! to delete from HASH Hash.delete
+            end
+            puts "#{__LINE__} word = \"\""
+            word = ""
+            puts "#{__LINE__} increment char index"
+            chr_idx = chr_idx + 1
+          else 
+            if ( chr != "\n" && chr != "\t" && chr != "\r" )
+              puts "#{__LINE__} ->#{chr}<- != \\n && != \\t && != \\r " 
+              if (chr != " ")
+                word = word + chr
+              else
+                if (nextCompound2BeFound == true ) 
+                  word = word + chr
+                end  
+              end
+            end
+            puts "#{__LINE__} increment chr index" 
+            chr_idx = chr_idx + 1
+            #if chr_idx > charsFromLine.length
+            #  puts "#{__LINE__} #{chr_idx} > #{charsFromLine.length} -> break" 
+            #end
+          end
+          #puts "File: #{File.path(tempFileContent)} lineNumber: #{lineNumber+1}"
+        end
+      end
+      #return tempFileContent 
+    end
+  end
+end

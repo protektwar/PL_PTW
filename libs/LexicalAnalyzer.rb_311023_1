@@ -1,0 +1,225 @@
+require_relative 'version.rb'
+require_relative 'syntaxPTW.rb'
+
+module RubyScript2CAPL
+
+class LexicalAnalyzer
+  attr_accessor :keywords, :error, :errorList, :specialChar
+  attr_accessor :includeFiles, :functionNames, :variableNames
+
+  def initialize(sourceFile)
+    puts "Script lexical converter version #{VERSIONLEXICALCONVERTER} Initialized"
+    @typeOfToken = "K_NA" #Keyword notAvailable  
+    @typeOfOperand = "O_NA" #Operand notAvailable  
+    @typeOfRelation = "R_NA" #Relationship notAvailable  
+
+    @openCloseCompound = 0;
+    @openCloseBraket = 0;
+    @openCloseParant = 0;
+    @openCloseBraces = 0;
+    @compoundVariable = Array.new
+    @line = ""
+    @isSpecialChar = false
+    @retValue = ""
+    @lineNumber = 0
+    @charCount = 0
+    @word = ""
+    @wordLast = ""
+    @wordIndex = 0
+    @word2Special = false
+    @special2Word = false
+    @specialWord = ""
+    @specialWordLast = ""
+    @haveWord = false
+    @haveWordOldState = @haveWord
+    @gotoNextLine = false
+    @currentToken = "T_NA"
+    @isCompound = false
+    @isParanthesis = false
+    @isBraket = false
+    @isBraces = false
+    @operandWord = "" 
+    @sourceFile = sourceFile
+    @fileCursorPosition = 0
+    @wordIndex = 0
+    @isNewWord = false
+    @fileContent = File.open(sourceFile)
+    @debugLexical = false
+    @debugLevel = 0         # 0 Disable | 1 Info | 2 Warning | 4 Detailed | 8 Full
+    @keywords = SyntaxPTW.new()
+    @includeFiles = Array.new
+    @functionNames = Hash.new # {"functionName" => {0 => "param1", 1 => "param2"}
+    @variableNames = Array.new
+    @error = Hash.new #{ "Error Name" => {0 => "Linenumber",     1 => "whatkindoferror",       2 => "awaiting values are"               }
+                      #    generated         codeGenerated      key@errorList=>0 or 1       generated based on relations
+    @errorList = {0 => "not a relationship", 1 => "forbidenRelation" }
+    @specialChar = [
+                      "(", 
+                      ")", 
+                      "[", 
+                      "]", 
+                      "{", 
+                      "}", 
+                      ";", 
+                      ":", 
+                      ",", 
+                      ".", 
+                      "\"",
+                      "'", 
+                      "_", 
+                      "-",
+                      "+",
+                      "=",
+                      "?",
+                      " ",
+                      "#",
+                      "|",
+                      "<",
+                      ">",
+                      "\/",
+                      "\\",
+                      "~",
+                      "!",
+                      "@",
+                      "$",
+                      "%",
+                      "^",
+                      "&",
+                      "*",
+                      "\n",
+                      "\t",
+                      "\r",
+                      "?"
+                   ]
+  end
+
+  def setDebugLevel(level)
+    @debugLevel = level
+  end
+
+  def activateLexicalDebugger
+    @debugLexical = true
+  end
+
+  def getTranslatedFileName()
+    return @file2Convert_name
+  end
+
+  def setFileHeadPosition(position)
+    @fileHeadPosition = poistion
+  end
+
+  def getFileHeadPosition
+    return @fileHeadPosition
+  end
+
+  def checker(file2Convert)
+    puts "Script lexical converter Started" if @debugLevel >= 0x1 
+    parseAndTranslateToSyntax()
+    puts "Script lexical converter Done" if @debugLevel >= 0x1
+  end
+
+  def toggle(variable)
+    if (variable)
+      return false
+    else
+      return true
+    end
+  end
+
+  def pringDebugMsg(file, line, debugLevel, messageStr)
+    if @debugLevel >= debugLevel
+      puts "#{file}:#{line} #{messageStr}" 
+    end
+  end
+
+  def parseAndTranslateToSyntax()
+
+    @fileContent.seek(@fileCursorPosition, IO::SEEK_SET)
+    pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "|-- @fileCursorPostion: #{@fileCursorPosition}")
+    pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "|--|")
+    @fileContent.each_char do |chr|
+      @charCount = @charCount + 1
+      pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "   | @fileContent.each_char do |#{chr}|")
+      pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "   |-- @fileCursorPostion: #{@fileContent.pos}")
+      pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "   |-- char.ord:->#{chr.ord}<- char: ->#{chr}<-")
+      @line = @line + chr
+      pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, " \nLINE:#{@line}")
+      pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "   |--|")
+      if !@specialChar.include?(chr)
+        pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "      | if !specialChar.include?(#{chr}) ")
+        @word = @word + chr
+        pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "      |-- @word: #{@word}")
+      elsif @specialChar.include?(chr)
+        pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "      | elsif specialChar.include?(#{chr.ord}) #{chr}")
+        case chr
+        when " ", "\n", "\t", "\r"
+          pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "      |-- when ' ', '\\n', '\\t', '\\r'")
+          pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "      |-- chr == '#{chr.ord}'")
+          if !@word.empty? 
+            @isNewWord = true
+          end
+          if chr == "\n" or chr == "\r"
+            pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, " chr == '/\n'")
+            @line = ""
+            @lineNumber = @lineNumber + 1
+          end
+          if @lineNumber == 10 
+            return {"lineNumber" => 0, "charCount" => 0, "retValue" => ""}
+          end  
+        when "\""
+          pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, " when '\"'")
+          @openCloseCompound = @openCloseCompound + 1
+        when "#"
+          pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, " when '#'")
+          if !@word.empty? 
+            @isNewWord = true;
+          end
+          @line = ""
+          pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, " read whole line #{@fileContent.gets} ")
+          @lineNumber = @lineNumber + 1
+        when "(", ")", ",", "[", "]", "{", "}",";"
+          pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, " when '?', '(', ',', '[', ']', ')', '{', '}',';' ")
+          @isNewWord = true;
+        when "?", "~", ":", "^", "!", "+", "-", "%", "/", "*", ">", "<", "=", "&", "|"
+          pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, " when '~', ':', '^', '!', '+', '-', '%', '/', '*','>','<','=','&','|'")
+          @operandWord = @operandWord + chr
+        when "."
+          pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, " when '.'")
+          @isNewWord = true;
+        else
+          pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, " else CHAR NOT FOUND")
+        end
+      end # if !@specialChar.include?(chr) | elsif @specialChar.include?(chr)
+      if @isNewWord  
+        if !@word.empty?
+          pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "    |-- if !@word.empty? #{@word} ")
+          @typeOfToken = @keywords.isToken?(@word)
+          if (@typeOfToken != "T_NA")
+            @retValue = @typeOfToken
+            @word = ""
+          end
+          pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, "    |-- typeOfToken: #{@typeOfToken}")
+        end
+        pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, " @word: #{@word} -> reset \n")
+        @isNewWord = false
+      end
+      if !@retValue.empty?
+        retValue = @retValue
+        @retValue = ""
+        if chr == " "
+          @fileCursorPosition = @fileContent.pos
+        else
+          @fileCursorPosition = @fileContent.pos-1
+        end
+        return {"lineNumber" => @lineNumber, "charCount" => @charCount, "retValue" => retValue}
+      end
+    end
+    pringDebugMsg(File.basename(__FILE__), __LINE__, 0x8, " file pos:#{@fileContent.pos} end of def") 
+    return {"lineNumber" => 0, "charCount" => 0, "retValue" => ""}
+  end
+end #class LexicalAnalyzer
+
+end #module RubyScript2CAPLConverter
+
+
